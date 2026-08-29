@@ -25,15 +25,15 @@ epoch seconds (float). The Swift `Codable` DTOs in
 | `ping` | – | `{ok, version}` |
 | `state` | – | `{system: SystemSnapshot, daemon: {version, pid, uptime_seconds, rss_bytes}}` |
 | `top` | `{n?: int=10}` | `[{name, process_count, footprint_bytes, pids}]` grouped by app name, sorted desc |
-| `predict` | – | `{eta_minutes_to_warn?, eta_minutes_to_critical?, confidence, slope_bytes_per_sec, avail_bytes, swap_in_rate_pages_per_sec, drivers}` |
-| `anomalies` | – | `[{pid, name, footprint_bytes, short_ewma_bytes, long_ewma_bytes, growth_bytes, first_detected_ts}]` |
+| `predict` | – | `{p_pressure15min, eta_p10_minutes?, eta_minutes_to_critical? (median), eta_minutes_to_warn?, confidence, slope_bytes_per_sec, avail_bytes, swap_in_rate_pages_per_sec, regime_shift_recent, theta_critical_bytes, drivers}` |
+| `anomalies` | – | `[{pid, name, footprint_bytes, slope_mb_per_hour, ceiling_bytes, tte_hours?, sustained_minutes, confidence}]` — Mann-Kendall/Theil-Sen leak flags vs each app's learned ceiling |
 | `history` | `{pid: int, minutes?: num=30}` | `[ProcessSample]` (daemon stores top 40 consumers every 30s) |
 | `policy_get` | – | Policy JSON (see `~/.config/mem-agent/policy.json`) |
 | `audit_tail` | `{n?: int=50}` | `{lines: [string]}` |
 | `propose` | `{use_llm?: bool=false, source?: string}` | `{source: "llm"\|"deterministic", analysis?, confidence?, verdicts: [ActionVerdict], escalation_health, estimated_recovery_mb}`. Blocks up to the escalation timeout when `use_llm` is set. Replaces any previously pending action ids. |
 | `execute` | `{action_id}` | `{id, executed, detail, auto_revert_at?}`. Re-validates against a fresh context before executing; reversible actions get an auto-revert deadline. |
 | `policy_set` | `{autonomy?, add_manageable?, remove_manageable?, add_protected?, remove_protected?}` | updated Policy JSON |
-| `chrome_sync` | `{tabs: [{id, active, audible, pinned, discarded, last_accessed (ms), url_host?, title?}]}` | `{discard_tab_ids: [int]}` — from the native-messaging host: stores the inventory, returns and clears queued discards |
+| `chrome_sync` | `{tabs: [{id, window_id?, active, audible, pinned, discarded, last_accessed (ms), url_host?, title?}], focused_window_id?}` | `{discard_tab_ids: [int]}` — from the native-messaging host: stores the inventory, returns and clears queued discards |
 | `chrome_status` | – | `{connected, tab_count, discardable_count, last_sync_ts?, pending_discards}` |
 
 ## ActionVerdict

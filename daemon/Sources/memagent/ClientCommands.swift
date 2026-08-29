@@ -40,13 +40,20 @@ enum ClientCommands {
         let avail = (p["avail_bytes"] as? NSNumber)?.uint64Value ?? 0
         let slope = (p["slope_bytes_per_sec"] as? NSNumber)?.doubleValue ?? 0
         let confidence = p["confidence"] as? String ?? "low"
+        let p15 = (p["p_pressure15min"] as? NSNumber)?.doubleValue ?? 0
+        let theta = (p["theta_critical_bytes"] as? NSNumber)?.uint64Value ?? 0
         print("avail: \(formatBytes(avail))   trend: \(String(format: "%+.1f MB/min", slope * 60 / 1_048_576))   confidence: \(confidence)")
+        print(String(format: "P(critical pressure within 15 min): %.0f%%   learned θ: %@%@",
+                     p15 * 100, formatBytes(theta),
+                     (p["regime_shift_recent"] as? Bool ?? false) ? "   [regime shift <2 min ago]" : ""))
         if let eta = (p["eta_minutes_to_warn"] as? NSNumber)?.doubleValue {
-            print(String(format: "ETA to warn pressure:     ~%.0f min", eta))
+            print(String(format: "ETA to warn threshold:      ~%.0f min", eta))
         }
         if let eta = (p["eta_minutes_to_critical"] as? NSNumber)?.doubleValue {
-            print(String(format: "ETA to critical pressure: ~%.0f min", eta))
-        } else if confidence == "low" || slope >= 0 {
+            let p10 = (p["eta_p10_minutes"] as? NSNumber)?.doubleValue
+            print(String(format: "ETA to critical (median):   ~%.0f min%@", eta,
+                         p10.map { String(format: "   (p10: ~%.0f min)", $0) } ?? ""))
+        } else if p15 < 0.2 {
             print("No critical pressure expected on the current trend.")
         }
         if let drivers = p["drivers"] as? [String], !drivers.isEmpty {
@@ -59,15 +66,20 @@ enum ClientCommands {
         let result = try SocketClient.call(method: "anomalies")
         if json { try SocketClient.printJSON(result); return }
         guard let list = result as? [[String: Any]], !list.isEmpty else {
-            print("No active growth anomalies.")
+            print("No active leaks (Mann-Kendall gate quiet).")
             return
         }
         for a in list {
             let name = a["name"] as? String ?? "?"
             let pid = a["pid"] as? Int ?? 0
-            let growth = (a["growth_bytes"] as? NSNumber)?.doubleValue ?? 0
+            let slope = (a["slope_mb_per_hour"] as? NSNumber)?.doubleValue ?? 0
             let fp = (a["footprint_bytes"] as? NSNumber)?.uint64Value ?? 0
-            print("  \(name) (pid \(pid)): \(formatBytes(fp)) now, +\(formatBytes(growth)) above 30-min baseline")
+            let ceiling = (a["ceiling_bytes"] as? NSNumber)?.uint64Value ?? 0
+            let tte = (a["tte_hours"] as? NSNumber)?.doubleValue
+            print(String(format: "  %@ (pid %d): %@ now, leaking %.0f MB/h vs ceiling %@%@ [%@]",
+                         name, pid, formatBytes(fp), slope, formatBytes(ceiling),
+                         tte.map { String(format: ", exhaustion ~%.1f h", $0) } ?? "",
+                         a["confidence"] as? String ?? ""))
         }
     }
 

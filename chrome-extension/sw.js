@@ -16,17 +16,21 @@ function hostOf(url) {
 
 async function sync() {
   let tabs;
+  let focused = null;
   try {
     tabs = await chrome.tabs.query({});
+    focused = await chrome.windows.getLastFocused().catch(() => null);
   } catch {
     return;
   }
   const now = Date.now();
   const payload = {
+    focused_window_id: focused?.focused ? focused.id : null,
     tabs: tabs
       .filter((t) => t.id !== chrome.tabs.TAB_ID_NONE)
       .map((t) => ({
         id: t.id,
+        window_id: t.windowId,
         active: t.active,
         audible: t.audible ?? false,
         pinned: t.pinned,

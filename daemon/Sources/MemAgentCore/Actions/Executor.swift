@@ -89,6 +89,13 @@ public final class Executor {
         }
     }
 
+    /// Targeted early revert (e.g. the user came back to a suspended app).
+    public func revertNow(pid: Int32, reason: String, audit: Audit) {
+        guard let s = suspensions[pid] else { return }
+        revert(s, reason: reason, audit: audit)
+        suspensions.removeValue(forKey: pid)
+    }
+
     /// Safety net on shutdown: never leave anything stopped behind us.
     public func revertAll(audit: Audit) {
         for (_, s) in suspensions {

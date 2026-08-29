@@ -77,7 +77,10 @@ public final class Router {
             }
             let data = try JSONSerialization.data(withJSONObject: rawTabs)
             let tabs = try JSON.decoder.decode([ChromeTab].self, from: data)
-            let discards = engine.queue.sync { engine.chromeSync(tabs: tabs) }
+            let focusedWindow = params["focused_window_id"] as? Int
+            let discards = engine.queue.sync {
+                engine.chromeSync(tabs: tabs, focusedWindowId: focusedWindow)
+            }
             struct SyncResult: Codable { var discardTabIds: [Int] }
             return try resultData(id: id, SyncResult(discardTabIds: discards))
 

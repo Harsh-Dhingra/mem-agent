@@ -10,14 +10,22 @@ all monitoring, history, and prediction with zero LLM involvement; Claude (in a
 session via MCP, or headlessly via `claude -p` in Phase D) only ever reasons
 over pre-digested state and picks from a policy-filtered action menu.
 
+Every non-trivial mechanism is research-grounded — see [RESEARCH.md](RESEARCH.md)
+for the paper-by-paper map (Autopilot, TMO/Senpai, PSI, Page-Hinkley,
+PrecogMF, SmartLMK, PREPP, Iqbal-Horvitz, TabRanker, and more).
+
 ```
-launchd daemon (Swift)                      Claude Code plugin
-┌────────────────────────────┐              ┌──────────────────────┐
-│ sensors  → SQLite history  │  unix socket │ MCP server (Node)    │
-│ EWMA prediction            │◄────────────►│ /memory command      │
-│ anomaly detection          │  ndjson      │                      │
-│ policy validator (Phase D) │              └──────────────────────┘
-└────────────────────────────┘
+launchd daemon (Swift)                            Claude Code plugin
+┌────────────────────────────────────┐            ┌──────────────────────┐
+│ sensors → SQLite history           │ unix sock  │ MCP server (Node)    │
+│ ├ damped-Holt predictor + MC band  │◄──────────►│ /memory command      │
+│ ├ Page-Hinkley regime detector     │  ndjson    │                      │
+│ ├ PSI-style thrash gauge (gate)    │            └──────────────────────┘
+│ ├ Theil-Sen/Mann-Kendall leaks     │            menu-bar app · Chrome
+│ ├ per-app learned baselines        │            tab bridge (discard)
+│ ├ usage model (PPM+frecency+dwell) │
+│ └ validator → reversible actions   │
+└────────────────────────────────────┘
 ```
 
 ## Quick start
@@ -70,10 +78,24 @@ memagent policy            # print ~/.config/mem-agent/policy.json
   to RSS from one `ps` sweep. No root, no entitlements.
 - History: SQLite (WAL) at `~/Library/Application Support/mem-agent/`,
   10s system / 30s top-40 process cadence, 7-day retention.
-- Prediction: EWMA slope of estimated-available memory with a variance gate —
-  an ETA is only reported for a stable downward trend. Deterministic, no ML.
-- Anomalies: short-window (2 min) vs long-window (30 min) EWMA per process;
-  fires at ratio > 1.5 **and** growth > 300 MB, sustained 3 sweeps.
+- Prediction: damped Holt (ETS(A,Ad,N)) with robust scale, a Page-Hinkley
+  regime detector that resets it on sudden shifts, and a Monte-Carlo
+  first-passage distribution → `P(critical within 15 min)` + p10/median ETAs
+  against a learned per-machine threshold (Autopilot-style decayed histogram).
+  Deterministic, no ML — see RESEARCH.md for why that's a considered choice.
+- Thrash gauge: PSI-style stall synthesis from swap-in/page-in/compressor
+  deltas. Swap-outs alone never alarm (healthy offloading); swap-ins do.
+  Gates all aggressive actions.
+- Leaks: Theil-Sen slope + Mann-Kendall significance (BH-corrected, 3
+  sustained windows) against each app's own learned ceiling
+  (p98×1.15 / weekly peak), with a 15-min warmup gate and a
+  cache-warming (deceleration) filter. Flags carry MB/h and time-to-exhaustion.
+- Action ranking: recovery-per-disruption (SmartLMK) using P(return) from an
+  order-3 PPM + frecency + reuse distance, the Iqbal-Horvitz dwell rule,
+  lmkd pressure bands, a ≤4-actions/hour budget, and re-fault feedback that
+  auto-disables action types users keep undoing.
+- Self-evaluation: `memagent backtest` replays the recorded history through
+  the new and legacy predictors and scores both against kernel truth.
 
 ## Status
 

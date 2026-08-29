@@ -17,6 +17,7 @@ COMMANDS:
   propose [--llm] [--json] Ask the daemon for a policy-validated recovery plan
   execute <action-id>      Execute one action from the last proposal (re-validated)
   escalate --dry-run       Full escalation drill: prompt → claude -p → validator verdicts, executes nothing
+  backtest [--days N]      Replay recorded history through the new + legacy predictors
   install                  Install binary + launchd agent (com.memagent.daemon)
   uninstall                Stop and remove the launchd agent
   chrome-install           Register the Chrome native-messaging host + print extension steps
@@ -88,7 +89,7 @@ do {
     case "chrome-install":
         try ChromeInstallCommand.install(
             extensionDir: optionValue("--extension-dir")
-                ?? "/Users/harsh/untitled folder/mem-agent/chrome-extension")
+                ?? Paths.home.appendingPathComponent("mem-agent/chrome-extension").path)
     case "chrome-status":
         try ChromeInstallCommand.status()
     case "menubar-install":
@@ -99,6 +100,12 @@ do {
         InstallCommand.status()
     case "logs":
         InstallCommand.logs(lines: optionValue("-n").flatMap(Int.init) ?? 50)
+    case "backtest":
+        let days = optionValue("--days").flatMap(Double.init) ?? 7
+        let db = try Database(path: Paths.database.path)
+        let series = try db.systemSeries(since: Date().timeIntervalSince1970 - days * 86400)
+        let total = Double(try SystemStats.totalMemory())
+        print(Backtest.run(series: series, totalBytes: total).rendered())
     case "policy":
         print(try Policy.loadOrCreateDefault().prettyJSON())
     case "version":

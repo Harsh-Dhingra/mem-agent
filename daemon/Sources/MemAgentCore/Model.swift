@@ -1,6 +1,6 @@
 import Foundation
 
-public let memAgentVersion = "0.2.0"
+public let memAgentVersion = "0.3.0"
 
 // MARK: - Paths
 
@@ -98,6 +98,33 @@ public struct SystemSnapshot: Codable {
     public var usedBytes: UInt64 {
         internalBytes &+ wiredBytes &+ compressedBytes
     }
+
+    public init(ts: Double, totalBytes: UInt64, freeBytes: UInt64, activeBytes: UInt64,
+                inactiveBytes: UInt64, wiredBytes: UInt64, compressedBytes: UInt64,
+                purgeableBytes: UInt64, externalBytes: UInt64, internalBytes: UInt64,
+                swapTotalBytes: UInt64, swapUsedBytes: UInt64, swapIns: UInt64,
+                swapOuts: UInt64, pageIns: UInt64, pageOuts: UInt64, compressions: UInt64,
+                pressureLevel: Int, availBytes: UInt64) {
+        self.ts = ts
+        self.totalBytes = totalBytes
+        self.freeBytes = freeBytes
+        self.activeBytes = activeBytes
+        self.inactiveBytes = inactiveBytes
+        self.wiredBytes = wiredBytes
+        self.compressedBytes = compressedBytes
+        self.purgeableBytes = purgeableBytes
+        self.externalBytes = externalBytes
+        self.internalBytes = internalBytes
+        self.swapTotalBytes = swapTotalBytes
+        self.swapUsedBytes = swapUsedBytes
+        self.swapIns = swapIns
+        self.swapOuts = swapOuts
+        self.pageIns = pageIns
+        self.pageOuts = pageOuts
+        self.compressions = compressions
+        self.pressureLevel = pressureLevel
+        self.availBytes = availBytes
+    }
 }
 
 // MARK: - Process sample
@@ -134,23 +161,61 @@ public struct ConsumerGroup: Codable {
 
 public struct Prediction: Codable {
     public var etaMinutesToWarn: Double?
-    public var etaMinutesToCritical: Double?
-    public var confidence: String        // "low" | "medium" | "high"
-    public var slopeBytesPerSec: Double  // of avail; negative = shrinking
+    public var etaMinutesToCritical: Double? // median of the first-passage distribution
+    public var etaP10Minutes: Double?        // pessimistic (10th percentile) ETA
+    public var pPressure15min: Double        // P(avail crosses learned critical θ within 15 min)
+    public var confidence: String            // "low" | "medium" | "high"
+    public var slopeBytesPerSec: Double      // of avail; negative = shrinking
     public var availBytes: UInt64
     public var swapInRatePagesPerSec: Double
+    public var regimeShiftRecent: Bool       // Page-Hinkley fired in the last 2 min
+    public var thetaCriticalBytes: UInt64    // the learned critical threshold in force
     public var drivers: [String]
+
+    public init(etaMinutesToWarn: Double? = nil, etaMinutesToCritical: Double? = nil,
+                etaP10Minutes: Double? = nil, pPressure15min: Double = 0,
+                confidence: String = "low", slopeBytesPerSec: Double = 0,
+                availBytes: UInt64 = 0, swapInRatePagesPerSec: Double = 0,
+                regimeShiftRecent: Bool = false, thetaCriticalBytes: UInt64 = 0,
+                drivers: [String] = []) {
+        self.etaMinutesToWarn = etaMinutesToWarn
+        self.etaMinutesToCritical = etaMinutesToCritical
+        self.etaP10Minutes = etaP10Minutes
+        self.pPressure15min = pPressure15min
+        self.confidence = confidence
+        self.slopeBytesPerSec = slopeBytesPerSec
+        self.availBytes = availBytes
+        self.swapInRatePagesPerSec = swapInRatePagesPerSec
+        self.regimeShiftRecent = regimeShiftRecent
+        self.thetaCriticalBytes = thetaCriticalBytes
+        self.drivers = drivers
+    }
 }
 
 public struct Anomaly: Codable {
     public var pid: Int32
     public var name: String
     public var footprintBytes: UInt64
-    public var shortEwmaBytes: Double
-    public var longEwmaBytes: Double
-    public var growthBytes: Double
-    public var firstDetectedTs: Double
+    public var slopeMbPerHour: Double
+    public var ceilingBytes: UInt64      // this app's learned normal ceiling
+    public var tteHours: Double?         // hours until system avail exhausted at this slope
+    public var sustainedMinutes: Double
+    public var confidence: String        // "medium" | "high"
+
+    public init(pid: Int32, name: String, footprintBytes: UInt64, slopeMbPerHour: Double,
+                ceilingBytes: UInt64, tteHours: Double?, sustainedMinutes: Double,
+                confidence: String) {
+        self.pid = pid
+        self.name = name
+        self.footprintBytes = footprintBytes
+        self.slopeMbPerHour = slopeMbPerHour
+        self.ceilingBytes = ceilingBytes
+        self.tteHours = tteHours
+        self.sustainedMinutes = sustainedMinutes
+        self.confidence = confidence
+    }
 }
+
 
 // MARK: - Formatting
 

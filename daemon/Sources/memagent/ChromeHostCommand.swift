@@ -20,7 +20,11 @@ enum ChromeHostCommand {
             return Data("{\"discard_tab_ids\":[],\"error\":\"bad message\"}".utf8)
         }
         do {
-            let result = try SocketClient.call(method: "chrome_sync", params: ["tabs": tabs])
+            var params: [String: Any] = ["tabs": tabs]
+            if let focused = obj["focused_window_id"] {
+                params["focused_window_id"] = focused
+            }
+            let result = try SocketClient.call(method: "chrome_sync", params: params)
             let data = try JSONSerialization.data(withJSONObject: result)
             return data
         } catch {

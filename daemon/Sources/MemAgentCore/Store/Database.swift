@@ -54,6 +54,102 @@ public final class Database {
         CREATE TABLE IF NOT EXISTS events(
             ts REAL NOT NULL, kind TEXT NOT NULL, json TEXT NOT NULL)
         """)
+        // v0.3 additions.
+        try exec("""
+        CREATE TABLE IF NOT EXISTS state_blobs(
+            key TEXT PRIMARY KEY, json TEXT NOT NULL, updated REAL)
+        """)
+        try exec("""
+        CREATE TABLE IF NOT EXISTS app_usage(
+            ts REAL NOT NULL, name TEXT NOT NULL, event TEXT NOT NULL)
+        """)
+        try exec("CREATE INDEX IF NOT EXISTS idx_usage_ts ON app_usage(ts)")
+        try exec("""
+        CREATE TABLE IF NOT EXISTS action_log(
+            ts REAL NOT NULL, action TEXT NOT NULL, target TEXT NOT NULL,
+            pid INTEGER, refault INTEGER DEFAULT 0)
+        """)
+    }
+
+    // MARK: - State blobs (persisted model state: histograms, usage model)
+
+    public func saveBlob(key: String, json: String) throws {
+        try withStatement("""
+            INSERT INTO state_blobs(key, json, updated) VALUES(?,?,?)
+            ON CONFLICT(key) DO UPDATE SET json=excluded.json, updated=excluded.updated
+            """) { stmt in
+            sqlite3_bind_text(stmt, 1, key, -1, SQLITE_TRANSIENT)
+            sqlite3_bind_text(stmt, 2, json, -1, SQLITE_TRANSIENT)
+            sqlite3_bind_double(stmt, 3, Date().timeIntervalSince1970)
+        }
+    }
+
+    public func loadBlob(key: String) throws -> String? {
+        var result: String?
+        try query("SELECT json FROM state_blobs WHERE key = ?",
+                  bind: { sqlite3_bind_text($0, 1, key, -1, SQLITE_TRANSIENT) }) { stmt in
+            result = String(cString: sqlite3_column_text(stmt, 0))
+        }
+        return result
+    }
+
+    // MARK: - Usage + action log (Stage D)
+
+    public func insertUsage(ts: Double, name: String, event: String) throws {
+        try withStatement("INSERT INTO app_usage(ts,name,event) VALUES(?,?,?)") { stmt in
+            sqlite3_bind_double(stmt, 1, ts)
+            sqlite3_bind_text(stmt, 2, name, -1, SQLITE_TRANSIENT)
+            sqlite3_bind_text(stmt, 3, event, -1, SQLITE_TRANSIENT)
+        }
+    }
+
+    public func insertAction(ts: Double, action: String, target: String, pid: Int32) throws {
+        try withStatement("INSERT INTO action_log(ts,action,target,pid) VALUES(?,?,?,?)") { stmt in
+            sqlite3_bind_double(stmt, 1, ts)
+            sqlite3_bind_text(stmt, 2, action, -1, SQLITE_TRANSIENT)
+            sqlite3_bind_text(stmt, 3, target, -1, SQLITE_TRANSIENT)
+            sqlite3_bind_int64(stmt, 4, Int64(pid))
+        }
+    }
+
+    public func markRefault(action: String, target: String, since: Double) throws {
+        try withStatement("""
+            UPDATE action_log SET refault = 1
+            WHERE action = ? AND target = ? AND ts >= ? AND refault = 0
+            """) { stmt in
+            sqlite3_bind_text(stmt, 1, action, -1, SQLITE_TRANSIENT)
+            sqlite3_bind_text(stmt, 2, target, -1, SQLITE_TRANSIENT)
+            sqlite3_bind_double(stmt, 3, since)
+        }
+    }
+
+    /// (executed, refaulted) counts per action type over the trailing window.
+    public func actionStats(action: String, sinceDays: Double) throws -> (total: Int, refaults: Int) {
+        var total = 0, refaults = 0
+        let since = Date().timeIntervalSince1970 - sinceDays * 86400
+        try query("""
+            SELECT COUNT(*), COALESCE(SUM(refault),0) FROM action_log
+            WHERE action = ? AND ts >= ?
+            """, bind: { stmt in
+            sqlite3_bind_text(stmt, 1, action, -1, SQLITE_TRANSIENT)
+            sqlite3_bind_double(stmt, 2, since)
+        }) { stmt in
+            total = Int(sqlite3_column_int64(stmt, 0))
+            refaults = Int(sqlite3_column_int64(stmt, 1))
+        }
+        return (total, refaults)
+    }
+
+    /// Full system-sample series for backtesting: (ts, avail, pressure_level).
+    public func systemSeries(since: Double) throws -> [(t: Double, avail: Double, level: Int)] {
+        var out: [(Double, Double, Int)] = []
+        try query("SELECT ts, avail, pressure_level FROM system_samples WHERE ts >= ? ORDER BY ts",
+                  bind: { sqlite3_bind_double($0, 1, since) }) { stmt in
+            out.append((sqlite3_column_double(stmt, 0),
+                        Double(sqlite3_column_int64(stmt, 1)),
+                        Int(sqlite3_column_int64(stmt, 2))))
+        }
+        return out
     }
 
     public func exec(_ sql: String) throws {

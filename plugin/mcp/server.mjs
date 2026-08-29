@@ -36,7 +36,7 @@ proxyTool(
 
 proxyTool(
   "predict",
-  "Deterministic time-to-pressure prediction: EWMA trend of available memory, ETA in minutes to warn/critical pressure (null if no stable downward trend), confidence, swap-in rate, and the drivers behind the trend.",
+  "Time-to-pressure prediction (damped-Holt + Monte-Carlo first passage): p_pressure15min = calibrated P(crossing the learned critical threshold within 15 min), eta_p10_minutes (pessimistic) and eta_minutes_to_critical (median), confidence, slope, regime_shift_recent, the learned theta, and drivers.",
   {},
   () => ({ method: "predict", params: {} }),
 );

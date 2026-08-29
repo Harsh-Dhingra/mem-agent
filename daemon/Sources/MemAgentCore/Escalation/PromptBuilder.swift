@@ -45,7 +45,10 @@ public enum PromptBuilder {
             "- \($0.name): \(formatBytes($0.footprintBytes)) (\($0.processCount) procs)"
         }.joined(separator: "\n")
         let anomalyLines = anomalies.isEmpty ? "none" : anomalies.prefix(5).map {
-            "- \($0.name) (pid \($0.pid)): \(formatBytes($0.footprintBytes)) now, +\(formatBytes($0.growthBytes)) above 30-min baseline"
+            String(format: "- %@ (pid %d): %@ now, leaking %.0f MB/h vs learned ceiling %@%@",
+                   $0.name, $0.pid, formatBytes($0.footprintBytes), $0.slopeMbPerHour,
+                   formatBytes($0.ceilingBytes),
+                   $0.tteHours.map { String(format: ", exhaustion in ~%.1f h", $0) } ?? "")
         }.joined(separator: "\n")
         let menuJSON = (try? JSON.encodeString(menu)) ?? "[]"
         let eta = prediction.etaMinutesToCritical.map { String(format: "%.0f min", $0) } ?? "none"
