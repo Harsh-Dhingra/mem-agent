@@ -30,9 +30,21 @@ launchd daemon (Swift)                            Claude Code plugin
 
 ## Quick start
 
+One command installs everything (daemon, menu bar, Chrome host, plugin deps) and is safe to re-run:
+
+```bash
+git clone https://github.com/Harsh-Dhingra/mem-agent ~/mem-agent
+zsh ~/mem-agent/install.sh          # proposals only; add --auto to let it act alone
+```
+
+Or, from inside Claude Code with the plugin loaded, just run `/memory-setup` and
+the agent installs and verifies the whole stack for you.
+
+Manual equivalents:
+
 ```bash
 make build          # swift build -c release
-make test           # swift run selftest (24 checks incl. live sensors)
+make test           # swift run selftest (93 checks incl. live sensors)
 make install        # copy binary + load launchd agent com.memagent.daemon
 make plugin         # npm install for the MCP server
 ```
