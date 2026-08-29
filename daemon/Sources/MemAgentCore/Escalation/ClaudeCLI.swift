@@ -80,7 +80,11 @@ public final class ClaudeCLI {
 
         let deadline = DispatchTime.now() + .seconds(policy.escalation.timeoutSeconds)
         let done = DispatchSemaphore(value: 0)
+        // Drain stdout CONCURRENTLY with waiting — reading only after exit
+        // deadlocks once the response exceeds the 64KB pipe buffer.
+        var data = Data()
         DispatchQueue.global().async {
+            data = pipe.fileHandleForReading.readDataToEndOfFile()
             task.waitUntilExit()
             done.signal()
         }
@@ -89,7 +93,6 @@ public final class ClaudeCLI {
             return .failure(.timeout(policy.escalation.timeoutSeconds))
         }
 
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
         guard let envelope = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let text = envelope["result"] as? String else {
             return .failure(.badOutput("missing .result in CLI JSON envelope"))
