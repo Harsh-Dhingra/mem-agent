@@ -1,0 +1,11 @@
+{
+  "name": "mem-agent-local",
+  "owner": { "name": "Harsh Dhingra" },
+  "plugins": [
+    {
+      "name": "mem-agent",
+      "source": "./plugin",
+      "description": "Live macOS memory state, leak anomalies, and time-to-pressure prediction from the memagent daemon, plus the /memory report command."
+    }
+  ]
+}

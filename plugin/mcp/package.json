@@ -1,0 +1,11 @@
+{
+  "name": "mem-agent-mcp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "MCP stdio server proxying the memagent daemon's unix socket",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "zod": "^3.23.0"
+  }
+}

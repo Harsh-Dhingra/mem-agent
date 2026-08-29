@@ -1,0 +1,11 @@
+{
+  "manifest_version": 3,
+  "name": "mem-agent tab bridge",
+  "version": "0.2.0",
+  "description": "Reports tab inventory to the mem-agent daemon and discards inactive tabs it approves. Tabs reload instantly when clicked.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEApFgMPFdP7PUZEqBnL5sCggFMseOWsmsJtJuYVw7nNI3zDhmLZsryNfMLL4/UXJlaHHYWWBctfFm2s9ysyfjZ/6s5294lbu1OVL2F8BYw4mMrlJYeutyLOSa/r5WsdDNlHinpUYk/0WhXs6f6+zaoKFKb0G4kQVuN93fYB3Va/aDJ2T1NUioV4Q0JV8a/lbaGeMJ4eL2lQudoyhfUjWat0N3AtT1qLyytlgzbBpNBzLVoX7eZBDQhot+xczl2/pTZlLmoR+DVOhEdeubE1UJTrFMCvNCC/9sNUoa72hBVj5fdTg8+KpMlGOlKQ4PE+amo9JNgAvgsTg9MWZpDiGr/fQIDAQAB",
+  "permissions": ["tabs", "nativeMessaging", "alarms"],
+  "background": {
+    "service_worker": "sw.js"
+  }
+}

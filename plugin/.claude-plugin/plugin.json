@@ -1,0 +1,12 @@
+{
+  "name": "mem-agent",
+  "version": "0.2.0",
+  "description": "Autonomous macOS memory-management agent: live memory state, growth anomalies, and time-to-pressure prediction from the memagent daemon.",
+  "author": { "name": "Harsh Dhingra" },
+  "mcpServers": {
+    "memagent": {
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/mcp/server.mjs"]
+    }
+  }
+}

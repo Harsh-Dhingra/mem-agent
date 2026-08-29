@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "memagent escalation plan (LLM output — Phase D)",
+  "description": "Strict shape the daemon requires from headless `claude -p` when it escalates. Every plan item is re-validated against the deterministic policy before anything executes.",
+  "type": "object",
+  "required": ["analysis", "plan", "confidence"],
+  "additionalProperties": false,
+  "properties": {
+    "analysis": {
+      "type": "string",
+      "maxLength": 1000,
+      "description": "One-paragraph reasoning about the memory situation."
+    },
+    "confidence": { "enum": ["low", "medium", "high"] },
+    "plan": {
+      "type": "array",
+      "maxItems": 3,
+      "items": {
+        "type": "object",
+        "required": ["action", "target_pid", "target_name", "reason"],
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "enum": ["sigstop_process", "docker_pause", "chrome_discard_tabs", "report"],
+            "description": "Must come from the pre-filtered legal action menu supplied in the prompt."
+          },
+          "target_pid": { "type": "integer" },
+          "target_name": { "type": "string" },
+          "reason": { "type": "string", "maxLength": 300 },
+          "expected_mb_freed": { "type": "number", "minimum": 0 }
+        }
+      }
+    }
+  }
+}
