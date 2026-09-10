@@ -564,6 +564,79 @@ do {
            "backtest: v0.3 alerts near-all true positives (\(report.truePositivesNew)/\(report.alertsNew))")
 }
 
+// MARK: - Wake-burst mode
+
+do {
+    var wake = WakeBurst()
+    expect(!wake.observeGap(now: 100, gap: 10), "wake: normal cadence is not a wake")
+    expect(!wake.active(now: 100), "wake: inactive before any sleep")
+    expect(wake.observeGap(now: 5000, gap: 3600), "wake: hour-long gap marks a wake")
+    expect(wake.active(now: 5000 + 120), "wake: window active shortly after")
+    expect(!wake.active(now: 5000 + 300), "wake: window expires after 4 min")
+    expect(wake.shouldEscalate(now: 5010, pressureLevel: 2, swapInPagesPerSec: 0),
+           "wake: kernel warn during window escalates")
+    expect(wake.shouldEscalate(now: 5010, pressureLevel: 1, swapInPagesPerSec: 5000),
+           "wake: swap-in storm during window escalates")
+    expect(!wake.shouldEscalate(now: 5010, pressureLevel: 1, swapInPagesPerSec: 100),
+           "wake: calm wake does not escalate")
+    expect(!wake.shouldEscalate(now: 5000 + 600, pressureLevel: 4, swapInPagesPerSec: 9999),
+           "wake: outside window, wake rules don't apply")
+}
+
+// MARK: - Tuner (counterfactual cutoff fit)
+
+do {
+    // Calm hour, 30-min drain into a real episode, held low — the tuner
+    // should pick a cutoff that anticipates the episode.
+    var series: [(t: Double, avail: Double, level: Int)] = []
+    var t = 0.0
+    for _ in 0..<360 { series.append((t, 8 * gb, 1)); t += 10 }
+    var avail = 8 * gb
+    for _ in 0..<180 {
+        avail -= 43 * mb
+        series.append((t, max(avail, 0.3 * gb), avail < 2.4 * gb ? 2 : 1))
+        t += 10
+    }
+    for _ in 0..<60 { series.append((t, 0.3 * gb, 2)); t += 10 }
+    let fitted = Tuner.fit(series: series, totalBytes: total)
+    expect(fitted != nil, "tuner: fits when an episode exists")
+    if let f = fitted {
+        expect(f.episodes == 1 && f.episodesCaught == 1,
+               "tuner: chosen cutoff anticipates the episode (caught \(f.episodesCaught)/\(f.episodes))")
+        expect(f.cutoff >= 0.5 && f.cutoff <= 0.95, "tuner: cutoff within clamp range")
+    }
+
+    let flat: [(t: Double, avail: Double, level: Int)] =
+        (0..<800).map { (Double($0) * 10, 8 * gb, 1) }
+    expect(Tuner.fit(series: flat, totalBytes: total) == nil,
+           "tuner: no episodes → nothing to fit")
+    expect(Tuner.fit(series: Array(series.prefix(100)), totalBytes: total) == nil,
+           "tuner: too little data → nothing to fit")
+}
+
+// MARK: - Onboarding profiles
+
+do {
+    let policy = Policy.default
+    let observed = ["Spotify", "Slack Helper (Renderer)", "Docker Desktop backend",
+                    "Terminal", "Cursor", "WindowServer", "Music", "random-app"]
+    let dev = Profiles.candidates(profile: "developer", observedNames: observed, policy: policy)
+    expect(dev.contains("Spotify") && dev.contains("Slack Helper (Renderer)")
+           && dev.contains("Docker Desktop backend"),
+           "profiles: developer matches observed names by prefix (got \(dev))")
+    expect(!dev.contains("Terminal") && !dev.contains("WindowServer"),
+           "profiles: protected apps never suggested")
+    expect(!dev.contains("Cursor") && !dev.contains("random-app"),
+           "profiles: uncurated apps never suggested")
+    let creative = Profiles.candidates(profile: "creative", observedNames: observed, policy: policy)
+    expect(!creative.contains("Docker Desktop backend"),
+           "profiles: creative profile skips dev tooling")
+    let filtered = Profiles.candidates(profile: "everyday", observedNames: observed,
+                                       policy: policy, heavilyUsed: ["Spotify"])
+    expect(!filtered.contains("Spotify"),
+           "profiles: heavily-used apps excluded from suggestions")
+}
+
 // MARK: - Live sensor sanity (this machine)
 
 do {

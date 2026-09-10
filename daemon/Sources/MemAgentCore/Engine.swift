@@ -29,6 +29,11 @@ public final class Engine {
     private var totalBytes: Double = 0
     private let ncpu = ProcessInfo.processInfo.processorCount
 
+    // v0.4: wake-burst + self-tuned alert cutoff (on queue).
+    var wake = WakeBurst()
+    private var lastSystemTs = 0.0
+    private(set) var alertCutoff = Tuner.defaultCutoff
+
     // Phase D state (on queue).
     private var pending: [String: ActionVerdict] = [:]
     private var rateLimiter = RateLimiter()
@@ -82,6 +87,11 @@ public final class Engine {
            let g = try? JSON.decoder.decode(PressureGauge.self, from: Data(json.utf8)) {
             gauge = g
         }
+        if let json = try? db.loadBlob(key: "tuned_params"),
+           let tuned = try? JSON.decoder.decode(Tuner.Result.self, from: Data(json.utf8)) {
+            alertCutoff = min(max(tuned.cutoff, 0.5), 0.95)
+            predictor.empiricalWarnAvail = tuned.kernelFlipAvail
+        }
     }
 
     private func persistState() {
@@ -113,6 +123,10 @@ public final class Engine {
         }
         schedule(interval: 6 * 3600) { [weak self] in try? self?.db.prune(olderThanDays: 7) }
         schedule(interval: 3600) { [weak self] in self?.selfCheck() }
+        // Nightly counterfactual self-tuning of the alert cutoff — plus one
+        // pass shortly after startup so upgrades benefit immediately.
+        schedule(interval: 24 * 3600) { [weak self] in self?.runTuning() }
+        queue.asyncAfter(deadline: .now() + 600) { [weak self] in self?.runTuning() }
         pressureSource = PressureSource(queue: queue) { [weak self] level in
             guard let self else { return }
             self.log("kernel pressure transition: \(level)")
@@ -151,21 +165,68 @@ public final class Engine {
             gauge.observe(snap, ncpu: ncpu)
             predictor.observe(t: snap.ts, avail: Double(snap.availBytes))
 
+            // Wake detection: a wall-clock gap in the 10s cadence = sleep.
+            if lastSystemTs > 0, wake.observeGap(now: snap.ts, gap: snap.ts - lastSystemTs) {
+                log(String(format: "wake detected after %.0f min of sleep — wake-burst window armed",
+                           wake.sleptFor / 60))
+                try? db.insertEvent(kind: "wake",
+                                    json: String(format: "{\"slept_seconds\":%.0f}", wake.sleptFor))
+            }
+            lastSystemTs = snap.ts
+
+            var instantSwapRate = 0.0
             if let last = lastSwapIns, snap.ts > last.t {
-                let rate = Double(snap.swapIns &- min(snap.swapIns, last.pages)) / (snap.ts - last.t)
-                swapInEwma.add(rate, at: snap.ts)
+                instantSwapRate = Double(snap.swapIns &- min(snap.swapIns, last.pages)) / (snap.ts - last.t)
+                swapInEwma.add(instantSwapRate, at: snap.ts)
             }
             lastSwapIns = (snap.ts, snap.swapIns)
 
-            // Predictive trigger, gated by corroborating measured pain
-            // (a forecast without pain only warrants cheap suggestions).
+            // Wake-burst trigger: direct evidence during the post-wake window —
+            // the smoothed gauge was zero-backfilled across sleep and lags.
+            if wake.shouldEscalate(now: snap.ts, pressureLevel: snap.pressureLevel,
+                                   swapInPagesPerSec: instantSwapRate) {
+                maybeEscalate(trigger: String(format: "wake_burst_level%d_swapin_%.0f",
+                                              snap.pressureLevel, instantSwapRate),
+                              wakeBypass: true)
+            }
+
+            // Predictive trigger at the self-tuned cutoff, gated by
+            // corroborating measured pain.
             let p = prediction()
-            if p.pPressure15min >= Self.escalationProbability, gauge.avg10 > 0.1 {
+            if p.pPressure15min >= alertCutoff, gauge.avg10 > 0.1 {
                 maybeEscalate(trigger: String(format: "p15_%.0f%%_thrash_%.2f",
                                               p.pPressure15min * 100, gauge.avg10))
             }
         } catch {
             log("system sample failed: \(error)")
+        }
+    }
+
+    /// Counterfactual fit of the alert cutoff on the trailing week (Google
+    /// far-memory control loop). Heavy lifting runs off the engine queue.
+    private func runTuning() {
+        let since = Date().timeIntervalSince1970 - 7 * 86400
+        guard let series = try? db.systemSeries(since: since) else { return }
+        let total = totalBytes
+        escalationQueue.async { [weak self] in
+            guard let self, let fitted = Tuner.fit(series: series, totalBytes: total) else {
+                self?.log("tuner: no ground-truth episodes in the trailing week — cutoff unchanged")
+                return
+            }
+            self.queue.async {
+                self.alertCutoff = min(max(fitted.cutoff, 0.5), 0.95)
+                self.predictor.empiricalWarnAvail = fitted.kernelFlipAvail
+                if let data = try? JSON.encoder.encode(fitted),
+                   let json = String(data: data, encoding: .utf8) {
+                    try? self.db.saveBlob(key: "tuned_params", json: json)
+                }
+                self.log(String(format: "tuner: cutoff → %.2f, kernel flip line → %@ (caught %d/%d episodes, %d/%d alerts true) on %d samples",
+                                fitted.cutoff,
+                                fitted.kernelFlipAvail.map { formatBytes($0) } ?? "unknown",
+                                fitted.episodesCaught, fitted.episodes,
+                                fitted.truePositives, fitted.alerts, fitted.samples))
+                self.audit.append(kind: "tuned", encodable: fitted)
+            }
         }
     }
 
@@ -297,6 +358,24 @@ public final class Engine {
 
     public func chromeStatus() -> ChromeStatus {
         chrome.status()
+    }
+
+    // MARK: - Onboarding (call on queue)
+
+    /// Profile-based allowlist suggestions, grounded in what this machine has
+    /// actually run in the last week and filtered by the user's own habits.
+    public func suggestAllowlist(profile: String) -> [String] {
+        let policy = (try? Policy.loadOrCreateDefault()) ?? .default
+        let observed = (try? db.distinctProcessNames(sinceDays: 7)) ?? []
+        let now = Date().timeIntervalSince1970
+        // Apps the user demonstrably lives in stay off the suggestion list.
+        var heavy = usage.appsRecentlyWorkedIn(now: now)
+        for (name, _) in usage.apps where usage.pReturn(app: name, now: now) > 0.5 {
+            heavy.insert(name)
+        }
+        return Profiles.candidates(profile: profile, observedNames: observed,
+                                   policy: policy, heavilyUsed: heavy)
+            .filter { !policy.manageable.contains($0) }
     }
 
     // MARK: - Action-type health (Acclaim re-fault loop)
@@ -614,7 +693,7 @@ public final class Engine {
 
     // MARK: - Autonomous escalation (on queue)
 
-    private func maybeEscalate(trigger: String) {
+    private func maybeEscalate(trigger: String, wakeBypass: Bool = false) {
         let policy = (try? Policy.loadOrCreateDefault()) ?? .default
         guard policy.autonomy != "off" else { return }
         let now = Date().timeIntervalSince1970
@@ -633,7 +712,9 @@ public final class Engine {
             let result = self.propose(useLLM: true, source: trigger)
             // Auto-execution needs stronger corroboration than the trigger
             // (lmkd debounce: one action, then re-measure before the next).
-            if policy.autonomy == "auto_reversible", thrashNow > 0.3 {
+            // A wake burst bypasses the smoothed gauge — it was zero-backfilled
+            // across the sleep and cannot have caught up yet.
+            if policy.autonomy == "auto_reversible", thrashNow > 0.3 || wakeBypass {
                 for verdict in result.verdicts
                 where verdict.allowed && verdict.action.action != "report" {
                     let exec = self.execute(actionID: verdict.id)

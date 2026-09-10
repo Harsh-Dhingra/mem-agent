@@ -1,6 +1,6 @@
 import Foundation
 
-public let memAgentVersion = "0.3.0"
+public let memAgentVersion = "0.4.0"
 
 // MARK: - Paths
 

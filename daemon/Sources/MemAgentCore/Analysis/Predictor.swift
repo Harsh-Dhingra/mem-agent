@@ -29,6 +29,12 @@ public final class PredictionEngine {
     private var windowMin = Double.infinity
     private var windowStart = 0.0
 
+    /// Median avail at observed kernel normal→warn flips (set by the nightly
+    /// tuner). The kernel is the ground truth for where pressure begins; when
+    /// known, θ_critical predicts THAT line, not our percentile guess — twelve
+    /// days of telemetry showed the kernel flipping at ~2× the learned θ.
+    public var empiricalWarnAvail: Double?
+
     public init(histogram: DecayedHistogram? = nil) {
         availHistogram = histogram ?? DecayedHistogram()
     }
@@ -82,7 +88,10 @@ public final class PredictionEngine {
         // normal operating level and alarm on flat traffic.
         let p5 = availHistogram.percentile(0.05) ?? floorCritical
         let p50 = availHistogram.percentile(0.50) ?? totalBytes
-        let critical = max(floorCritical, min(p5, 0.5 * p50))
+        var critical = max(floorCritical, min(p5, 0.5 * p50))
+        if let flip = empiricalWarnAvail, flip > 0 {
+            critical = max(critical, min(0.9 * flip, 0.35 * totalBytes))
+        }
         var warn = min(max(min(availHistogram.percentile(0.25) ?? 2 * critical, 0.75 * p50),
                            1.5 * critical),
                        0.25 * totalBytes)

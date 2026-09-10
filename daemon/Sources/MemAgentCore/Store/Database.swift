@@ -242,6 +242,17 @@ public final class Database {
         return out
     }
 
+    /// Distinct process names observed recently (onboarding suggestions).
+    public func distinctProcessNames(sinceDays: Double) throws -> [String] {
+        var out: [String] = []
+        let since = Date().timeIntervalSince1970 - sinceDays * 86400
+        try query("SELECT DISTINCT name FROM process_samples WHERE ts >= ?",
+                  bind: { sqlite3_bind_double($0, 1, since) }) { stmt in
+            out.append(String(cString: sqlite3_column_text(stmt, 0)))
+        }
+        return out
+    }
+
     /// Delete rows older than `days` and downsample nothing (v1 keeps it simple).
     public func prune(olderThanDays days: Double) throws {
         let cutoff = Date().timeIntervalSince1970 - days * 86400

@@ -106,8 +106,16 @@ memagent policy            # print ~/.config/mem-agent/policy.json
   order-3 PPM + frecency + reuse distance, the Iqbal-Horvitz dwell rule,
   lmkd pressure bands, a ≤4-actions/hour budget, and re-fault feedback that
   auto-disables action types users keep undoing.
-- Self-evaluation: `memagent backtest` replays the recorded history through
-  the new and legacy predictors and scores both against kernel truth.
+- Self-evaluation: `memagent backtest` replays recorded history (new vs legacy
+  predictor) against kernel truth; a nightly counterfactual tuner re-fits the
+  alert cutoff AND learns the kernel's empirical warn line from its own
+  observed pressure flips (`memagent tune` runs it on demand).
+- Wake-burst mode: laptops hit pressure at lid-open, when the working set
+  swaps back in as a storm — a sampling gap arms a 4-minute window where the
+  daemon escalates on direct evidence instead of lagging smoothed averages.
+- Onboarding profiles: first run, the menu bar proposes a manageable
+  allowlist (Developer/Creative/Everyday) from apps actually observed on this
+  Mac — nothing enters the list without explicit approval.
 
 ## Status
 

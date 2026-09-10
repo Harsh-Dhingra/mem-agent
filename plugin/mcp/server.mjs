@@ -93,6 +93,13 @@ proxyTool(
 );
 
 proxyTool(
+  "suggest_allowlist",
+  "Onboarding: profile-based allowlist suggestions (developer/creative/everyday), grounded in processes actually observed on this Mac in the last week, minus protected apps and anything the user heavily uses. Present to the user for approval, then apply via policy_set.",
+  { profile: z.enum(["developer", "creative", "everyday"]).optional() },
+  ({ profile }) => ({ method: "suggest_allowlist", params: { profile: profile ?? "everyday" } }),
+);
+
+proxyTool(
   "chrome_status",
   "Status of the Chrome tab bridge: whether the mem-agent extension is connected, total tabs, and how many inactive tabs are currently discardable (the biggest memory lever when Chrome is the top consumer).",
   {},

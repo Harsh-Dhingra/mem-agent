@@ -90,6 +90,12 @@ public final class Router {
         case "policy_get":
             return try resultData(id: id, try Policy.loadOrCreateDefault())
 
+        case "suggest_allowlist":
+            let profile = params["profile"] as? String ?? "everyday"
+            let names = engine.queue.sync { engine.suggestAllowlist(profile: profile) }
+            struct Suggestion: Codable { var profile: String; var candidates: [String] }
+            return try resultData(id: id, Suggestion(profile: profile, candidates: names))
+
         case "audit_tail":
             let n = params["n"] as? Int ?? 50
             let lines = (try? String(contentsOf: Paths.auditLog, encoding: .utf8))

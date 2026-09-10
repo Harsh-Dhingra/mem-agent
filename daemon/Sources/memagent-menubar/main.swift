@@ -18,6 +18,10 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
     private var chromeLine = ""
     private var daemonOK = false
 
+    private var onboardingMarker: URL {
+        Paths.appSupport.appendingPathComponent("onboarded")
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem.button?.title = "◌ mem"
@@ -26,6 +30,86 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
         refresh()
         timer = Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { [weak self] _ in
             self?.refresh()
+        }
+        // First-run onboarding: an empty allowlist forever is a product that
+        // never earns its keep. Offer a grounded starter profile once.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
+            self?.maybeOnboard(force: false)
+        }
+    }
+
+    // MARK: - Onboarding
+
+    private func maybeOnboard(force: Bool) {
+        if !force {
+            guard !FileManager.default.fileExists(atPath: onboardingMarker.path) else { return }
+            let manageable = (try? SocketClient.call(method: "policy_get") as? [String: Any])
+                .flatMap { $0?["manageable"] as? [String] } ?? []
+            guard manageable.isEmpty else {
+                try? Data().write(to: onboardingMarker)
+                return
+            }
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        let profileAlert = NSAlert()
+        profileAlert.messageText = "Set up mem-agent"
+        profileAlert.informativeText = "Pick a profile and mem-agent will suggest apps it may suspend when they're idle and memory is tight. Suspended apps freeze in place and resume instantly — nothing is ever closed. You approve the exact list next."
+        profileAlert.addButton(withTitle: "Developer")
+        profileAlert.addButton(withTitle: "Creative")
+        profileAlert.addButton(withTitle: "Everyday")
+        profileAlert.addButton(withTitle: "Not now")
+        let choice = profileAlert.runModal()
+        try? Data().write(to: onboardingMarker)
+        let profile: String
+        switch choice {
+        case .alertFirstButtonReturn: profile = "developer"
+        case .alertSecondButtonReturn: profile = "creative"
+        case .alertThirdButtonReturn: profile = "everyday"
+        default: return
+        }
+
+        refreshQueue.async { [weak self] in
+            let candidates = (try? SocketClient.call(
+                method: "suggest_allowlist", params: ["profile": profile]) as? [String: Any])
+                .flatMap { $0?["candidates"] as? [String] } ?? []
+            DispatchQueue.main.async { self?.confirmCandidates(candidates, profile: profile) }
+        }
+    }
+
+    private func confirmCandidates(_ candidates: [String], profile: String) {
+        guard !candidates.isEmpty else {
+            alert(text: "No \(profile)-profile apps observed on this Mac yet. mem-agent keeps learning — rerun “Set Up Profile…” from the menu any time.")
+            return
+        }
+        let confirm = NSAlert()
+        confirm.messageText = "Allow mem-agent to manage these when idle?"
+        confirm.informativeText = "Seen on this Mac in the last week and safe to suspend (media, chat helpers, dev tools). Untick anything you'd rather leave alone."
+        let stack = NSStackView()
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 6
+        var boxes: [NSButton] = []
+        for name in candidates.prefix(12) {
+            let box = NSButton(checkboxWithTitle: name, target: nil, action: nil)
+            box.state = .on
+            boxes.append(box)
+            stack.addArrangedSubview(box)
+        }
+        stack.frame = NSRect(x: 0, y: 0, width: 320,
+                             height: CGFloat(boxes.count) * 26 + 8)
+        confirm.accessoryView = stack
+        confirm.addButton(withTitle: "Allow selected")
+        confirm.addButton(withTitle: "Skip")
+        guard confirm.runModal() == .alertFirstButtonReturn else { return }
+        let approved = boxes.filter { $0.state == .on }.map(\.title)
+        guard !approved.isEmpty else { return }
+        refreshQueue.async { [weak self] in
+            _ = try? SocketClient.call(method: "policy_set",
+                                       params: ["add_manageable": approved])
+            DispatchQueue.main.async {
+                self?.alert(text: "Added \(approved.count) app(s) to the manageable allowlist. They're only ever suspended when idle, under pressure, within the safety rules — and resume the moment you return.")
+                self?.refresh()
+            }
         }
     }
 
@@ -104,9 +188,17 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
         optimize.target = self
         optimize.isEnabled = daemonOK
         menu.addItem(optimize)
+        let setup = NSMenuItem(title: "Set Up Profile…", action: #selector(runOnboarding), keyEquivalent: "")
+        setup.target = self
+        setup.isEnabled = daemonOK
+        menu.addItem(setup)
         menu.addItem(.separator())
         let quit = NSMenuItem(title: "Quit mem-agent menu bar", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         menu.addItem(quit)
+    }
+
+    @objc private func runOnboarding() {
+        maybeOnboard(force: true)
     }
 
     private func disabled(_ title: String) -> NSMenuItem {

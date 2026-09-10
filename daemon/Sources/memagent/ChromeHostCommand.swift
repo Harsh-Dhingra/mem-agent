@@ -71,42 +71,84 @@ enum ChromeHostCommand {
     }
 }
 
-/// Registers the native-messaging host with Chrome and prints extension
-/// install steps.
+/// Registers the native-messaging host with every installed Chromium-family
+/// browser and prints extension install steps.
 enum ChromeInstallCommand {
     static let hostName = "com.memagent.chrome"
-    /// Stable extension id derived from the `key` in the extension manifest.
+    /// Stable dev extension id derived from the `key` in the extension manifest.
     static let extensionID = "hmbdhbcmcnfbbeebfkogdekejkgpejfd"
+    /// A Chrome Web Store install has a different, store-assigned id; once
+    /// known it's saved here so re-installs keep honoring it.
+    static var storeIDFile: URL {
+        Paths.home.appendingPathComponent(".config/mem-agent/store-extension-id")
+    }
 
-    static func install(extensionDir: String) throws {
+    /// App Support subpaths of Chromium-family browsers (relative to
+    /// ~/Library/Application Support). The host manifest is written into each
+    /// browser that is actually present; Chrome always gets one.
+    static let browserDirs: [(name: String, path: String)] = [
+        ("Chrome", "Google/Chrome"),
+        ("Chrome Beta", "Google/Chrome Beta"),
+        ("Chrome Canary", "Google/Chrome Canary"),
+        ("Chromium", "Chromium"),
+        ("Brave", "BraveSoftware/Brave-Browser"),
+        ("Edge", "Microsoft Edge"),
+        ("Arc", "Arc/User Data"),
+        ("Vivaldi", "Vivaldi"),
+    ]
+
+    static func install(extensionDir: String, storeExtensionID: String? = nil) throws {
+        let fm = FileManager.default
         let wrapper = Paths.home.appendingPathComponent(".local/bin/memagent-chrome-host")
         let script = """
         #!/bin/zsh
         exec "\(Paths.installedBinary.path)" chrome-host
         """
         try script.write(to: wrapper, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: wrapper.path)
+        try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: wrapper.path)
 
+        // Remember a store id across re-installs.
+        if let storeExtensionID {
+            try? storeExtensionID.write(to: storeIDFile, atomically: true, encoding: .utf8)
+        }
+        var origins = ["chrome-extension://\(extensionID)/"]
+        if let saved = try? String(contentsOf: storeIDFile, encoding: .utf8)
+            .trimmingCharacters(in: .whitespacesAndNewlines), !saved.isEmpty {
+            origins.append("chrome-extension://\(saved)/")
+        }
         let manifest: [String: Any] = [
             "name": hostName,
             "description": "mem-agent Chrome tab bridge",
             "path": wrapper.path,
             "type": "stdio",
-            "allowed_origins": ["chrome-extension://\(extensionID)/"],
+            "allowed_origins": origins,
         ]
-        let dir = Paths.home.appendingPathComponent(
-            "Library/Application Support/Google/Chrome/NativeMessagingHosts")
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        let manifestURL = dir.appendingPathComponent("\(hostName).json")
-        try JSONSerialization.data(withJSONObject: manifest, options: [.prettyPrinted])
-            .write(to: manifestURL)
+        let data = try JSONSerialization.data(withJSONObject: manifest, options: [.prettyPrinted])
 
-        print("native messaging host registered: \(manifestURL.path)")
+        let appSupport = Paths.home.appendingPathComponent("Library/Application Support")
+        var registered: [String] = []
+        for browser in browserDirs {
+            let base = appSupport.appendingPathComponent(browser.path)
+            // Only register into browsers that exist — except Chrome, always.
+            guard browser.name == "Chrome" || fm.fileExists(atPath: base.path) else { continue }
+            let dir = base.appendingPathComponent("NativeMessagingHosts")
+            try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+            try data.write(to: dir.appendingPathComponent("\(hostName).json"))
+            registered.append(browser.name)
+        }
+
+        print("native messaging host registered for: \(registered.joined(separator: ", "))")
+        if origins.count > 1 {
+            print("allowed extension ids: dev + store (\(origins.count) origins)")
+        }
         print("")
-        print("Finish in Chrome (one time):")
+        print("Finish in your browser (one time):")
         print("  1. chrome://extensions → enable Developer mode")
         print("  2. Load unpacked → \(extensionDir)")
         print("  3. Check: memagent chrome-status (connected within ~30s)")
+        print("")
+        print("After the Web Store listing is live, rerun with the store id:")
+        print("  memagent chrome-install --store-id <id-from-web-store>")
     }
 
     static func status() throws {

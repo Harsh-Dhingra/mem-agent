@@ -20,7 +20,8 @@ COMMANDS:
   backtest [--days N]      Replay recorded history through the new + legacy predictors
   install                  Install binary + launchd agent (com.memagent.daemon)
   uninstall                Stop and remove the launchd agent
-  chrome-install           Register the Chrome native-messaging host + print extension steps
+  tune [--days N]          Fit the alert cutoff on recorded history (daemon does this nightly)
+  chrome-install [--store-id ID]  Register the native host with every Chromium-family browser
   chrome-status            Chrome tab-bridge status (connected, tab counts)
   menubar-install          Install the menu-bar app as a login launchd agent
   menubar-uninstall        Remove the menu-bar launchd agent
@@ -89,7 +90,8 @@ do {
     case "chrome-install":
         try ChromeInstallCommand.install(
             extensionDir: optionValue("--extension-dir")
-                ?? Paths.home.appendingPathComponent("mem-agent/chrome-extension").path)
+                ?? Paths.home.appendingPathComponent("mem-agent/chrome-extension").path,
+            storeExtensionID: optionValue("--store-id"))
     case "chrome-status":
         try ChromeInstallCommand.status()
     case "menubar-install":
@@ -106,6 +108,22 @@ do {
         let series = try db.systemSeries(since: Date().timeIntervalSince1970 - days * 86400)
         let total = Double(try SystemStats.totalMemory())
         print(Backtest.run(series: series, totalBytes: total).rendered())
+    case "tune":
+        let days = optionValue("--days").flatMap(Double.init) ?? 7
+        let db = try Database(path: Paths.database.path)
+        let series = try db.systemSeries(since: Date().timeIntervalSince1970 - days * 86400)
+        let total = Double(try SystemStats.totalMemory())
+        if let fitted = Tuner.fit(series: series, totalBytes: total) {
+            print(String(format: """
+                TUNER — fitted on %d samples, %d ground-truth episodes
+                best alert cutoff:    %.2f  (daemon default 0.80)
+                at that cutoff:       %d alerts, %d true, %d/%d episodes anticipated
+                The daemon re-fits nightly and applies the result automatically.
+                """, fitted.samples, fitted.episodes, fitted.cutoff,
+                fitted.alerts, fitted.truePositives, fitted.episodesCaught, fitted.episodes))
+        } else {
+            print("tuner: not enough history or no pressure episodes in the window — nothing to fit")
+        }
     case "policy":
         print(try Policy.loadOrCreateDefault().prettyJSON())
     case "version":
